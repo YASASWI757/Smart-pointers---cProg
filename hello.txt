@@ -1,0 +1,5 @@
+Types of Smart Pointers
+1. auto_ptr (Deprecated)
+2. unique_ptr
+3. shared_ptr
+4. weak_ptr
