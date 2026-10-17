@@ -1,73 +1,180 @@
-
 # Smart Pointer Library for C
 
-A reusable C library inspired by smart pointers in C++.
-It provides abstractions for managing dynamically allocated
-memory using explicit ownership rules.
+A C11 library for managing dynamically allocated objects through
+explicit ownership rules.
 
-## Features
+## Current status
 
-- Unique ownership
-- Borrowed pointer access
-- Explicit ownership transfer
-- Explicit release of ownership
-- Automatic cleanup through a destructor callback
-- Unit tests for ownership and memory-management behavior
+Implemented and tested:
+- Common status codes and readable error messages
+- Allocator hooks and managed-allocation tracking
+- Unique ownership: make, adopt, get, move, release, reset and free
+- Static library build
+- Unit tests, sanitizer checks and Valgrind targets
 
-Shared ownership, reference counting, and weak references
-will be integrated as those modules are implemented.
+Pending integration:
+- Shared ownership and reference counting
+- Weak references
+- Unique-to-shared conversion
 
-## Project Structure
+## Requirements
 
-- `include/` - Public library headers
-- `src/` - Library implementations
-- `examples/` - Demonstration programs
-- `tests/` - Automated tests
+- GCC or Clang
+- GNU Make
+- Valgrind for memory checks
+- Linux or WSL Ubuntu for the documented commands
 
-## Build the Unique Pointer Demo
+## Build and run
 
-From the project root, run:
+Run from the repository root:
+
+```bash
+make all
+make test
+make demo
+make asan
+make valgrind
+```
+
+Build only the static library:
+
+```bash
+make lib
+```
+
+The library is generated at `build/libsmartptr.a`.
+
+Remove generated files:
+
+```bash
+make clean
+```
+
+## Using the library
+
+Include the public entry header:
+
+```c
+#include "smartptr.h"
+```
+
+Example:
+
+```c
+#include <stdio.h>
+#include "smartptr.h"
+
+int main(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    sp_status status = sp_unique_make(&owner, sizeof(int), NULL);
+
+    if (status != SP_OK) {
+        fprintf(stderr, "%s\n", sp_strerror(status));
+        return 1;
+    }
+
+    int *value = sp_unique_get(&owner);
+    *value = 42;
+    printf("%d\n", *value);
+
+    return sp_unique_free(&owner) == SP_OK ? 0 : 1;
+}
+```
+
+After building the library, compile an application saved as `app.c`:
 
 ```bash
 gcc -std=c11 -Wall -Wextra -Wpedantic -Iinclude \
-    src/sp_unique.c examples/unique_demo.c -o unique_demo
+    app.c build/libsmartptr.a -o app
 ```
 
-Run the generated program:
+## Ownership rules
 
-```bash
-./unique_demo
-```
+| Operation | Ownership effect |
+|---|---|
+| make | Allocates into an empty handle |
+| adopt | Takes ownership of an existing compatible allocation |
+| get | Borrows access; ownership stays with the handle |
+| move | Transfers ownership into an empty destination |
+| release | Transfers ownership to the caller |
+| reset | Destroys the old object and takes a replacement |
+| free | Destroys the object and empties the handle |
 
-## Run the Tests
+Initialize every handle with `SP_UNIQUE_EMPTY`.
 
-```bash
-gcc -std=c11 -Wall -Wextra -Wpedantic -Iinclude \
-    src/sp_unique.c tests/test_unique.c -o test_unique
-```
+Never copy owning handles with ordinary structure assignment.
+Use `sp_unique_move`.
 
-Run the tests:
+The destructor callback cleans nested resources. The library then
+deallocates the outer object. Cleanup is explicitly triggered by API
+calls; standard C does not automatically clean handles at scope exit.
 
-```bash
-./test_unique
-```
+Adopted and replacement allocations must be compatible with the
+currently configured deallocator and must not have another owner.
 
-## Ownership Rules
+After release, the caller must perform any required nested cleanup and
+use the allocation's matching deallocator.
 
-- A unique handle is the sole owner of its allocation.
-- A pointer returned by `sp_unique_get()` is borrowed.
-- `sp_unique_move()` transfers ownership to an empty handle.
-- `sp_unique_release()` transfers the raw allocation to the caller.
-- `sp_unique_free()` destroys an owned allocation.
-- A borrowed pointer must not be used after its object is destroyed.
+A borrowed pointer must not be used after its object is destroyed.
 
-## Team Contributions
+## Allocation tracking
 
-- Unique-pointer module and integration: [add contributor]
-- Shared-pointer module and reference counting: [add contributor]
+`sp_live_allocations()` counts allocations currently managed by the
+library, including adopted allocations.
 
-## Project Status
+Released allocations and application allocations not registered with
+the library are excluded. The counter complements memory tools; it is
+not a system-wide leak detector.
 
-Unique-pointer implementation: in progress.
-Shared-pointer implementation: planned.
-Weak-reference extension: planned.
+Allocator hook changes are rejected while tracked allocations exist.
+
+## Project structure
+
+- `include/`: Public headers
+- `src/`: Implementations and private declarations
+- `tests/`: Common, allocator and unique tests
+- `examples/`: Demonstration programs
+- `documentation/`: Module documentation
+- `build/`: Generated files, ignored by Git
+
+The current Makefile builds the common and unique modules.
+Shared-related files are placeholders pending integration.
+
+## Verification
+
+The current tests and unique demo passed:
+- GCC compilation with warnings treated as errors
+- AddressSanitizer and UndefinedBehaviorSanitizer
+- Valgrind with zero reported errors and no remaining allocations
+
+Tests include allocation failure injection, ownership transitions,
+nested-resource destruction and 100,000 make/free cycles.
+
+These results cover the exercised test paths.
+
+## Limitations
+
+- Single-threaded implementation
+- Raw handle copies can violate ownership
+- Borrowed pointers are not tracked
+- Validation markers do not make uninitialized handles safe
+- Allocator compatibility is the caller's responsibility
+- No automatic scope-exit cleanup
+
+## Team responsibilities
+
+- N Saketh: Common layer, unique ownership, Makefile, unique tests
+  and unique documentation
+- S Mithil Reddy: Shared ownership, control block and weak references
+- Sai Yasaswi: Test framework, system-level memory tests, demo,
+  CI and overall documentation
+- Shared public API and integration: All members
+
+## Documentation and credits
+
+See [Unique module documentation](documentation/unique.md).
+
+Ownership operations are inspired by C++ smart-pointer concepts.
+Record external code, references and assistance according to the
+course's attribution requirements.
