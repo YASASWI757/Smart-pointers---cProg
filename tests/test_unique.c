@@ -324,6 +324,100 @@ static void test_release_and_free_status(void) {
     assert(sp_unique_free(&owner) == SP_OK);
 }
 
+typedef struct {
+    char *name;
+} TestStudent;
+
+static int student_destructor_calls = 0;
+
+static void destroy_student(void *object) {
+    TestStudent *student = object;
+
+    free(student->name);
+    student->name = NULL;
+    ++student_destructor_calls;
+}
+
+static void test_nested_resource_destructor(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+    student_destructor_calls = 0;
+
+    assert(sp_unique_make(
+        &owner, sizeof(TestStudent), destroy_student
+    ) == SP_OK);
+
+    TestStudent *student = sp_unique_get(&owner);
+
+    /*
+     * Initialize the field before any possible cleanup.
+     * make does not initialize the object's contents.
+     */
+    student->name = NULL;
+    student->name = malloc(7);
+
+    if (student->name == NULL) {
+        assert(sp_unique_free(&owner) == SP_OK);
+        assert(!"Test setup allocation failed");
+        return;
+    }
+
+    snprintf(student->name, 7, "%s", "Saketh");
+
+    assert(sp_unique_free(&owner) == SP_OK);
+    assert(student_destructor_calls == 1);
+    assert(sp_unique_get(&owner) == NULL);
+
+    assert(sp_unique_free(&owner) == SP_OK);
+    assert(student_destructor_calls == 1);
+    assert(sp_live_allocations() == 0);
+}
+
+static void test_move_occupied_destination(void) {
+    sp_unique source = SP_UNIQUE_EMPTY;
+    sp_unique destination = SP_UNIQUE_EMPTY;
+
+    assert(sp_unique_make(&source, sizeof(int), NULL)
+           == SP_OK);
+    assert(sp_unique_make(&destination, sizeof(int), NULL)
+           == SP_OK);
+
+    int *source_ptr = sp_unique_get(&source);
+    int *destination_ptr = sp_unique_get(&destination);
+
+    *source_ptr = 10;
+    *destination_ptr = 20;
+
+    assert(sp_unique_move(&destination, &source)
+           == SP_ERR_NOT_EMPTY);
+
+    /* Rejected move preserves both objects and their values. */
+    assert(sp_unique_get(&source) == source_ptr);
+    assert(sp_unique_get(&destination) == destination_ptr);
+    assert(*source_ptr == 10);
+    assert(*destination_ptr == 20);
+    assert(sp_live_allocations() == 2);
+
+    assert(sp_unique_free(&source) == SP_OK);
+    assert(sp_unique_free(&destination) == SP_OK);
+    assert(sp_live_allocations() == 0);
+}
+
+static void test_repeated_make_free(void) {
+    for (size_t i = 0; i < 100000; ++i) {
+        sp_unique owner = SP_UNIQUE_EMPTY;
+
+        assert(sp_unique_make(&owner, sizeof(int), NULL)
+               == SP_OK);
+
+        int *value = sp_unique_get(&owner);
+        *value = 42;
+        assert(*value == 42);
+
+        assert(sp_unique_free(&owner) == SP_OK);
+    }
+
+    assert(sp_live_allocations() == 0);
+}
 
 int main(void) {
     test_make_and_get();
@@ -340,6 +434,9 @@ int main(void) {
     test_invalid_handle_marker();
     test_self_move();
     test_release_and_free_status();
+    test_nested_resource_destructor();
+    test_move_occupied_destination();
+    test_repeated_make_free();
     assert(sp_live_allocations() == 0);
 
     printf("All unique-pointer tests passed!\n");
