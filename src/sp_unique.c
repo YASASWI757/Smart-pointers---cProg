@@ -84,3 +84,52 @@ void sp_unique_free(sp_unique *owner) {
 
     *owner = SP_UNIQUE_EMPTY;
 }
+
+int sp_unique_adopt(
+    sp_unique *owner,
+    void *raw,
+    sp_destructor_fn destroy
+) {
+    if (owner == NULL) {
+        return SP_UNIQUE_ERROR;
+    }
+
+    if (owner->ptr != NULL || owner->destroy != NULL) {
+        return SP_UNIQUE_ERROR;
+    }
+
+    owner->ptr = raw;
+    owner->destroy = raw != NULL ? destroy : NULL;
+
+    return SP_UNIQUE_SUCCESS;
+}
+
+int sp_unique_reset(
+    sp_unique *owner,
+    void *new_raw,
+    sp_destructor_fn destroy
+) {
+    if (owner == NULL) {
+        return SP_UNIQUE_ERROR;
+    }
+
+    if (owner->ptr == new_raw) {
+        return SP_UNIQUE_SUCCESS;
+    }
+
+    void *old_ptr = owner->ptr;
+    sp_destructor_fn old_destroy = owner->destroy;
+
+    owner->ptr = new_raw;
+    owner->destroy = new_raw != NULL ? destroy : NULL;
+
+    if (old_ptr != NULL) {
+        if (old_destroy != NULL) {
+            old_destroy(old_ptr);
+        }
+
+        free(old_ptr);
+    }
+
+    return SP_UNIQUE_SUCCESS;
+}
