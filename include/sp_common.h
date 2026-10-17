@@ -19,7 +19,9 @@ typedef void *(*sp_malloc_fn)(size_t size);
 typedef void (*sp_free_fn)(void *ptr);
 
 /*
- * Number of outstanding allocations tracked by the library.
+ * Number of allocations currently managed by the library,
+ * including adopted allocations. Released allocations and
+ * unregistered nested resources are not counted.
  * Not a system-wide leak detector.
  */
 size_t sp_live_allocations(void);

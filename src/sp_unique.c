@@ -1,7 +1,7 @@
 
 #include "sp_unique.h"
 
-#include <stdlib.h>
+#include "sp_internal.h"
 
 int sp_unique_make(
     sp_unique *owner,
@@ -17,7 +17,7 @@ int sp_unique_make(
         return SP_UNIQUE_ERROR;
     }
 
-    void *memory = malloc(size);
+    void *memory = sp__alloc(size);
 
     if (memory == NULL) {
         return SP_UNIQUE_ERROR;
@@ -66,6 +66,10 @@ void *sp_unique_release(sp_unique *owner) {
     void *memory = owner->ptr;
     *owner = SP_UNIQUE_EMPTY;
 
+    if (memory != NULL) {
+        sp__untrack();
+    }
+
     return memory;
 }
 
@@ -79,7 +83,7 @@ void sp_unique_free(sp_unique *owner) {
             owner->destroy(owner->ptr);
         }
 
-        free(owner->ptr);
+        sp__free(owner->ptr);;
     }
 
     *owner = SP_UNIQUE_EMPTY;
@@ -96,6 +100,12 @@ int sp_unique_adopt(
 
     if (owner->ptr != NULL || owner->destroy != NULL) {
         return SP_UNIQUE_ERROR;
+    }
+
+    if (raw != NULL) {
+        if (sp__track_external() != SP_OK) {
+            return SP_UNIQUE_ERROR;
+        }
     }
 
     owner->ptr = raw;
@@ -117,6 +127,16 @@ int sp_unique_reset(
         return SP_UNIQUE_SUCCESS;
     }
 
+    /*
+     * Register the replacement before changing the handle.
+     * Failure leaves both ownerships unchanged.
+     */
+    if (new_raw != NULL) {
+        if (sp__track_external() != SP_OK) {
+            return SP_UNIQUE_ERROR;
+        }
+    }
+
     void *old_ptr = owner->ptr;
     sp_destructor_fn old_destroy = owner->destroy;
 
@@ -128,7 +148,7 @@ int sp_unique_reset(
             old_destroy(old_ptr);
         }
 
-        free(old_ptr);
+        sp__free(old_ptr);
     }
 
     return SP_UNIQUE_SUCCESS;

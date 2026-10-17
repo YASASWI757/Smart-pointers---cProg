@@ -97,3 +97,17 @@ void sp__free(void *ptr) {
     --live_allocations;
     current_deallocate(ptr);
 }
+
+sp_status sp__track_external(void) {
+    if (live_allocations == SIZE_MAX) {
+        return SP_ERR_OVERFLOW;
+    }
+
+    ++live_allocations;
+    return SP_OK;
+}
+
+void sp__untrack(void) {
+    assert(live_allocations > 0);
+    --live_allocations;
+}
