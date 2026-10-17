@@ -74,12 +74,114 @@ static void test_invalid_inputs(void) {
     assert(sp_unique_move(NULL, &owner)
            == SP_UNIQUE_ERROR);
 }
+static int destructor_calls = 0;
+
+static void count_destructor(void *object) {
+    (void)object;
+    ++destructor_calls;
+}
+
+static void test_adopt(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    int *raw = malloc(sizeof *raw);
+    assert(raw != NULL);
+    *raw = 77;
+
+    assert(sp_unique_adopt(&owner, raw, NULL)
+           == SP_UNIQUE_SUCCESS);
+
+    assert(sp_unique_get(&owner) == raw);
+    assert(*(int *)sp_unique_get(&owner) == 77);
+
+    /* The handle now owns raw. */
+    sp_unique_free(&owner);
+}
+
+static void test_adopt_occupied(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    assert(sp_unique_make(&owner, sizeof(int), NULL)
+           == SP_UNIQUE_SUCCESS);
+
+    void *original = sp_unique_get(&owner);
+
+    int *raw = malloc(sizeof *raw);
+    assert(raw != NULL);
+
+    assert(sp_unique_adopt(&owner, raw, NULL)
+           == SP_UNIQUE_ERROR);
+
+    assert(sp_unique_get(&owner) == original);
+
+    /* Failed adoption leaves raw owned by this test. */
+    free(raw);
+    sp_unique_free(&owner);
+}
+
+static void test_reset(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+    destructor_calls = 0;
+
+    assert(sp_unique_make(
+        &owner, sizeof(int), count_destructor
+    ) == SP_UNIQUE_SUCCESS);
+
+    int *replacement = malloc(sizeof *replacement);
+    assert(replacement != NULL);
+    *replacement = 88;
+
+    assert(sp_unique_reset(
+        &owner, replacement, count_destructor
+    ) == SP_UNIQUE_SUCCESS);
+
+    assert(destructor_calls == 1);
+    assert(sp_unique_get(&owner) == replacement);
+    assert(*(int *)sp_unique_get(&owner) == 88);
+
+    /* Same-pointer reset preserves the original destructor. */
+    assert(sp_unique_reset(&owner, replacement, NULL)
+           == SP_UNIQUE_SUCCESS);
+    assert(destructor_calls == 1);
+
+    /* Reset to NULL destroys the replacement. */
+    assert(sp_unique_reset(&owner, NULL, NULL)
+           == SP_UNIQUE_SUCCESS);
+    assert(destructor_calls == 2);
+    assert(sp_unique_get(&owner) == NULL);
+
+    sp_unique_free(&owner);
+    sp_unique_free(&owner);
+    assert(destructor_calls == 2);
+}
+
+static void test_adopt_reset_empty_and_null(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    assert(sp_unique_adopt(NULL, NULL, NULL)
+           == SP_UNIQUE_ERROR);
+    assert(sp_unique_reset(NULL, NULL, NULL)
+           == SP_UNIQUE_ERROR);
+
+    assert(sp_unique_adopt(&owner, NULL, count_destructor)
+           == SP_UNIQUE_SUCCESS);
+    assert(owner.ptr == NULL);
+    assert(owner.destroy == NULL);
+
+    assert(sp_unique_reset(&owner, NULL, NULL)
+           == SP_UNIQUE_SUCCESS);
+}
+
 
 int main(void) {
     test_make_and_get();
     test_move();
     test_release();
     test_invalid_inputs();
+    test_adopt();
+    test_adopt_occupied();
+    test_reset();
+    test_adopt_reset_empty_and_null();
 
     printf("All unique-pointer tests passed!\n");
     return 0;

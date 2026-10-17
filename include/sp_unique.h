@@ -49,4 +49,29 @@ void *sp_unique_release(sp_unique *owner);
 /* Destroys the owned object and empties the handle. */
 void sp_unique_free(sp_unique *owner);
 
+/*
+ * Takes ownership of a malloc-compatible allocation.
+ * Destination must be empty.
+ * On failure, ownership remains with the caller.
+ * raw == NULL creates an empty handle.
+ */
+int sp_unique_adopt(
+    sp_unique *owner,
+    void *raw,
+    sp_destructor_fn destroy
+);
+
+/*
+ * Destroys the old object and takes ownership of new_raw.
+ * new_raw must be malloc-compatible or NULL.
+ * Resetting to the currently owned pointer is a no-op;
+ * its existing destructor is preserved.
+ */
+int sp_unique_reset(
+    sp_unique *owner,
+    void *new_raw,
+    sp_destructor_fn destroy
+);
+
+
 #endif
