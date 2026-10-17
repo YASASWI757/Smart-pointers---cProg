@@ -234,6 +234,59 @@ static void test_ownership_tracking(void) {
     assert(sp_live_allocations() == 0);
 }
 
+static void test_invalid_handle_marker(void) {
+    /* Fully initialized fields, deliberately invalid marker. */
+    sp_unique bad = SP_UNIQUE_EMPTY;
+    sp_unique empty = SP_UNIQUE_EMPTY;
+    bad.magic = 0;
+
+    size_t before = sp_live_allocations();
+
+    assert(sp_unique_make(&bad, sizeof(int), NULL)
+           == SP_UNIQUE_ERROR);
+
+    assert(sp_unique_get(&bad) == NULL);
+    assert(sp_unique_release(&bad) == NULL);
+
+    assert(sp_unique_move(&empty, &bad)
+           == SP_UNIQUE_ERROR);
+
+    assert(sp_unique_move(&bad, &empty)
+           == SP_UNIQUE_ERROR);
+
+    assert(sp_unique_adopt(&bad, NULL, NULL)
+           == SP_UNIQUE_ERROR);
+
+    assert(sp_unique_reset(&bad, NULL, NULL)
+           == SP_UNIQUE_ERROR);
+
+    sp_unique_free(&bad);
+
+    assert(sp_live_allocations() == before);
+    assert(sp_unique_get(&empty) == NULL);
+}
+
+static void test_self_move(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    assert(sp_unique_make(&owner, sizeof(int), NULL)
+           == SP_UNIQUE_SUCCESS);
+
+    int *original = sp_unique_get(&owner);
+    *original = 55;
+
+    size_t before = sp_live_allocations();
+
+    assert(sp_unique_move(&owner, &owner)
+           == SP_UNIQUE_SUCCESS);
+
+    assert(sp_unique_get(&owner) == original);
+    assert(*original == 55);
+    assert(sp_live_allocations() == before);
+
+    sp_unique_free(&owner);
+}
+
 
 int main(void) {
     test_make_and_get();
@@ -247,6 +300,8 @@ int main(void) {
     assert(sp_live_allocations() == 0);
     test_make_allocation_failure();
     test_ownership_tracking();
+    test_invalid_handle_marker();
+    test_self_move();
     assert(sp_live_allocations() == 0);
 
     printf("All unique-pointer tests passed!\n");
