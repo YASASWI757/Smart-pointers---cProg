@@ -3,12 +3,30 @@
 
 #include "sp_internal.h"
 
+/*
+ * Only call with NULL or a pointer to an initialized handle.
+ * The marker does not validate arbitrary memory or raw copies.
+ */
+static int sp_unique_is_valid(const sp_unique *owner) {
+    if (owner == NULL) {
+        return 0;
+    }
+
+    if (owner->magic != SP_MAGIC_UNIQUE) {
+        return 0;
+    }
+
+    /* Empty handles must not retain a destructor. */
+    return owner->ptr != NULL || owner->destroy == NULL;
+}
+
+
 int sp_unique_make(
     sp_unique *owner,
     size_t size,
     sp_destructor_fn destroy
 ) {
-    if (owner == NULL || size == 0) {
+    if (!sp_unique_is_valid(owner) || size == 0) {
         return SP_UNIQUE_ERROR;
     }
 
@@ -30,7 +48,7 @@ int sp_unique_make(
 }
 
 void *sp_unique_get(const sp_unique *owner) {
-    if (owner == NULL) {
+    if (!sp_unique_is_valid(owner)) {
         return NULL;
     }
 
@@ -38,7 +56,7 @@ void *sp_unique_get(const sp_unique *owner) {
 }
 
 int sp_unique_move(sp_unique *dst, sp_unique *src) {
-    if (dst == NULL || src == NULL) {
+    if (!sp_unique_is_valid(dst) || !sp_unique_is_valid(src)) {
         return SP_UNIQUE_ERROR;
     }
 
@@ -59,7 +77,7 @@ int sp_unique_move(sp_unique *dst, sp_unique *src) {
 }
 
 void *sp_unique_release(sp_unique *owner) {
-    if (owner == NULL) {
+    if (!sp_unique_is_valid(owner)) {
         return NULL;
     }
 
@@ -74,7 +92,7 @@ void *sp_unique_release(sp_unique *owner) {
 }
 
 void sp_unique_free(sp_unique *owner) {
-    if (owner == NULL) {
+    if (!sp_unique_is_valid(owner)) {
         return;
     }
 
@@ -94,7 +112,7 @@ int sp_unique_adopt(
     void *raw,
     sp_destructor_fn destroy
 ) {
-    if (owner == NULL) {
+    if (!sp_unique_is_valid(owner)) {
         return SP_UNIQUE_ERROR;
     }
 
@@ -119,7 +137,7 @@ int sp_unique_reset(
     void *new_raw,
     sp_destructor_fn destroy
 ) {
-    if (owner == NULL) {
+    if (!sp_unique_is_valid(owner)) {
         return SP_UNIQUE_ERROR;
     }
 

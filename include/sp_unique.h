@@ -11,12 +11,17 @@
  */
 typedef void (*sp_destructor_fn)(void *object);
 
+#define SP_MAGIC_UNIQUE 0x5350554Eu
+
 typedef struct {
     void *ptr;
     sp_destructor_fn destroy;
+    unsigned magic;
 } sp_unique;
 
-#define SP_UNIQUE_EMPTY ((sp_unique){ NULL, NULL })
+/* Every handle must be initialized before use. */
+#define SP_UNIQUE_EMPTY \
+    ((sp_unique){ NULL, NULL, SP_MAGIC_UNIQUE })
 
 enum {
     SP_UNIQUE_SUCCESS = 0,
