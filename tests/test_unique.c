@@ -1,0 +1,444 @@
+
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "smartptr.h"
+
+static void test_make_and_get(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    assert(sp_unique_make(&owner, sizeof(int), NULL)
+           == SP_OK);
+
+    int *value = sp_unique_get(&owner);
+    assert(value != NULL);
+
+    *value = 123;
+    assert(*(int *)sp_unique_get(&owner) == 123);
+
+    sp_unique_free(&owner);
+    assert(sp_unique_get(&owner) == NULL);
+}
+
+static void test_move(void) {
+    sp_unique source = SP_UNIQUE_EMPTY;
+    sp_unique destination = SP_UNIQUE_EMPTY;
+
+    assert(sp_unique_make(&source, sizeof(int), NULL)
+           == SP_OK);
+
+    *(int *)sp_unique_get(&source) = 42;
+
+    void *original_address = sp_unique_get(&source);
+
+    assert(sp_unique_move(&destination, &source)
+           == SP_OK);
+
+    assert(sp_unique_get(&source) == NULL);
+    assert(sp_unique_get(&destination) == original_address);
+    assert(*(int *)sp_unique_get(&destination) == 42);
+
+    sp_unique_free(&source);
+    sp_unique_free(&destination);
+    assert(sp_unique_get(&destination) == NULL);
+}
+
+static void test_release(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    assert(sp_unique_make(&owner, sizeof(int), NULL)
+           == SP_OK);
+
+    *(int *)sp_unique_get(&owner) = 99;
+
+    void *released = NULL;
+    assert(sp_unique_release(&owner, &released) == SP_OK);
+    int *raw = released;
+
+    assert(raw != NULL);
+    assert(*raw == 99);
+    assert(sp_unique_get(&owner) == NULL);
+
+    /* Ownership now belongs to this test. */
+    free(raw);
+}
+
+static void test_invalid_inputs(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    assert(sp_unique_make(&owner, 0, NULL)
+           == SP_ERR_INVALID_SIZE);
+
+    assert(sp_unique_make(NULL, sizeof(int), NULL)
+           == SP_ERR_NULL_ARG);
+
+    assert(sp_unique_move(NULL, &owner)
+           == SP_ERR_NULL_ARG);
+}
+
+static int destructor_calls = 0;
+
+static void count_destructor(void *object) {
+    (void)object;
+    ++destructor_calls;
+}
+
+static void test_adopt(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    int *raw = malloc(sizeof *raw);
+    assert(raw != NULL);
+    *raw = 77;
+
+    assert(sp_unique_adopt(&owner, raw, NULL)
+           == SP_OK);
+
+    assert(sp_unique_get(&owner) == raw);
+    assert(*(int *)sp_unique_get(&owner) == 77);
+
+    /* The handle now owns raw. */
+    sp_unique_free(&owner);
+}
+
+static void test_adopt_occupied(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    assert(sp_unique_make(&owner, sizeof(int), NULL)
+           == SP_OK);
+
+    void *original = sp_unique_get(&owner);
+
+    int *raw = malloc(sizeof *raw);
+    assert(raw != NULL);
+
+    assert(sp_unique_adopt(&owner, raw, NULL)
+           == SP_ERR_NOT_EMPTY);
+
+    assert(sp_unique_get(&owner) == original);
+
+    /* Failed adoption leaves raw owned by this test. */
+    free(raw);
+    sp_unique_free(&owner);
+}
+
+static void test_reset(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+    destructor_calls = 0;
+
+    assert(sp_unique_make(
+        &owner, sizeof(int), count_destructor
+    ) == SP_OK);
+
+    int *replacement = malloc(sizeof *replacement);
+    assert(replacement != NULL);
+    *replacement = 88;
+
+    assert(sp_unique_reset(
+        &owner, replacement, count_destructor
+    ) == SP_OK);
+
+    assert(destructor_calls == 1);
+    assert(sp_unique_get(&owner) == replacement);
+    assert(*(int *)sp_unique_get(&owner) == 88);
+
+    /* Same-pointer reset preserves the original destructor. */
+    assert(sp_unique_reset(&owner, replacement, NULL)
+           == SP_OK);
+    assert(destructor_calls == 1);
+
+    /* Reset to NULL destroys the replacement. */
+    assert(sp_unique_reset(&owner, NULL, NULL)
+           == SP_OK);
+    assert(destructor_calls == 2);
+    assert(sp_unique_get(&owner) == NULL);
+
+    sp_unique_free(&owner);
+    sp_unique_free(&owner);
+    assert(destructor_calls == 2);
+}
+
+static void test_adopt_reset_empty_and_null(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    assert(sp_unique_adopt(NULL, NULL, NULL)
+           == SP_ERR_NULL_ARG);
+    assert(sp_unique_reset(NULL, NULL, NULL)
+           == SP_ERR_NULL_ARG);
+
+    assert(sp_unique_adopt(&owner, NULL, count_destructor)
+           == SP_OK);
+    assert(owner.ptr == NULL);
+    assert(owner.destroy == NULL);
+
+    assert(sp_unique_reset(&owner, NULL, NULL)
+           == SP_OK);
+}
+
+static void *always_fail(size_t size) {
+    (void)size;
+    return NULL;
+}
+
+static void test_make_allocation_failure(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    assert(sp_live_allocations() == 0);
+
+    assert(sp_set_allocator(always_fail, free) == SP_OK);
+
+    assert(sp_unique_make(&owner, sizeof(int), NULL)
+           == SP_ERR_NO_MEMORY);
+
+    assert(sp_unique_get(&owner) == NULL);
+    assert(sp_live_allocations() == 0);
+
+    assert(sp_set_allocator(NULL, NULL) == SP_OK);
+}
+
+static void test_ownership_tracking(void) {
+    sp_unique source = SP_UNIQUE_EMPTY;
+    sp_unique destination = SP_UNIQUE_EMPTY;
+
+    assert(sp_live_allocations() == 0);
+
+    assert(sp_unique_make(&source, sizeof(int), NULL)
+           == SP_OK);
+    assert(sp_live_allocations() == 1);
+
+    assert(sp_set_allocator(NULL, NULL)
+           == SP_ERR_NOT_EMPTY);
+
+    assert(sp_unique_move(&destination, &source)
+           == SP_OK);
+    assert(sp_live_allocations() == 1);
+
+    void *released = NULL;
+    assert(sp_unique_release(&destination, &released) == SP_OK);
+    int *raw = released;
+    assert(raw != NULL);
+    assert(sp_live_allocations() == 0);
+
+    assert(sp_unique_adopt(&source, raw, NULL)
+           == SP_OK);
+    assert(sp_live_allocations() == 1);
+
+    int *replacement = malloc(sizeof *replacement);
+    assert(replacement != NULL);
+
+    assert(sp_unique_reset(&source, replacement, NULL)
+           == SP_OK);
+    assert(sp_live_allocations() == 1);
+
+    assert(sp_unique_reset(&source, NULL, NULL)
+           == SP_OK);
+    assert(sp_live_allocations() == 0);
+
+    sp_unique_free(&source);
+    sp_unique_free(&destination);
+    assert(sp_live_allocations() == 0);
+}
+
+static void test_invalid_handle_marker(void) {
+    /* Fully initialized fields, deliberately invalid marker. */
+    sp_unique bad = SP_UNIQUE_EMPTY;
+    sp_unique empty = SP_UNIQUE_EMPTY;
+    bad.magic = 0;
+
+    size_t before = sp_live_allocations();
+
+    assert(sp_unique_make(&bad, sizeof(int), NULL)
+           == SP_ERR_INVALID_HANDLE);
+
+    assert(sp_unique_get(&bad) == NULL);
+    void *released = NULL;
+    assert(sp_unique_release(&bad, &released)
+       == SP_ERR_INVALID_HANDLE);
+    assert(released == NULL);
+
+    assert(sp_unique_move(&empty, &bad)
+           == SP_ERR_INVALID_HANDLE);
+
+    assert(sp_unique_move(&bad, &empty)
+           == SP_ERR_INVALID_HANDLE);
+
+    assert(sp_unique_adopt(&bad, NULL, NULL)
+           == SP_ERR_INVALID_HANDLE);
+
+    assert(sp_unique_reset(&bad, NULL, NULL)
+           == SP_ERR_INVALID_HANDLE);
+
+    assert(sp_unique_free(&bad) == SP_ERR_INVALID_HANDLE);
+
+    assert(sp_live_allocations() == before);
+    assert(sp_unique_get(&empty) == NULL);
+}
+
+static void test_self_move(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    assert(sp_unique_make(&owner, sizeof(int), NULL)
+           == SP_OK);
+
+    int *original = sp_unique_get(&owner);
+    *original = 55;
+
+    size_t before = sp_live_allocations();
+
+    assert(sp_unique_move(&owner, &owner)
+           == SP_OK);
+
+    assert(sp_unique_get(&owner) == original);
+    assert(*original == 55);
+    assert(sp_live_allocations() == before);
+
+    sp_unique_free(&owner);
+}
+
+static void test_release_and_free_status(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+    int sentinel = 0;
+    void *released = &sentinel;
+
+    assert(sp_unique_release(NULL, &released)
+           == SP_ERR_NULL_ARG);
+    assert(released == &sentinel);
+
+    assert(sp_unique_release(&owner, NULL)
+           == SP_ERR_NULL_ARG);
+
+    assert(sp_unique_release(&owner, &released) == SP_OK);
+    assert(released == NULL);
+
+    assert(sp_unique_free(NULL) == SP_ERR_NULL_ARG);
+    assert(sp_unique_free(&owner) == SP_OK);
+    assert(sp_unique_free(&owner) == SP_OK);
+
+    assert(sp_unique_make(&owner, sizeof(int), NULL) == SP_OK);
+    void *original = sp_unique_get(&owner);
+
+    assert(sp_unique_release(&owner, &owner.ptr)
+           == SP_ERR_INVALID_HANDLE);
+    assert(sp_unique_get(&owner) == original);
+
+    assert(sp_unique_free(&owner) == SP_OK);
+}
+
+typedef struct {
+    char *name;
+} TestStudent;
+
+static int student_destructor_calls = 0;
+
+static void destroy_student(void *object) {
+    TestStudent *student = object;
+
+    free(student->name);
+    student->name = NULL;
+    ++student_destructor_calls;
+}
+
+static void test_nested_resource_destructor(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+    student_destructor_calls = 0;
+
+    assert(sp_unique_make(
+        &owner, sizeof(TestStudent), destroy_student
+    ) == SP_OK);
+
+    TestStudent *student = sp_unique_get(&owner);
+
+    /*
+     * Initialize the field before any possible cleanup.
+     * make does not initialize the object's contents.
+     */
+    student->name = NULL;
+    student->name = malloc(7);
+
+    if (student->name == NULL) {
+        assert(sp_unique_free(&owner) == SP_OK);
+        assert(!"Test setup allocation failed");
+        return;
+    }
+
+    snprintf(student->name, 7, "%s", "Saketh");
+
+    assert(sp_unique_free(&owner) == SP_OK);
+    assert(student_destructor_calls == 1);
+    assert(sp_unique_get(&owner) == NULL);
+
+    assert(sp_unique_free(&owner) == SP_OK);
+    assert(student_destructor_calls == 1);
+    assert(sp_live_allocations() == 0);
+}
+
+static void test_move_occupied_destination(void) {
+    sp_unique source = SP_UNIQUE_EMPTY;
+    sp_unique destination = SP_UNIQUE_EMPTY;
+
+    assert(sp_unique_make(&source, sizeof(int), NULL)
+           == SP_OK);
+    assert(sp_unique_make(&destination, sizeof(int), NULL)
+           == SP_OK);
+
+    int *source_ptr = sp_unique_get(&source);
+    int *destination_ptr = sp_unique_get(&destination);
+
+    *source_ptr = 10;
+    *destination_ptr = 20;
+
+    assert(sp_unique_move(&destination, &source)
+           == SP_ERR_NOT_EMPTY);
+
+    /* Rejected move preserves both objects and their values. */
+    assert(sp_unique_get(&source) == source_ptr);
+    assert(sp_unique_get(&destination) == destination_ptr);
+    assert(*source_ptr == 10);
+    assert(*destination_ptr == 20);
+    assert(sp_live_allocations() == 2);
+
+    assert(sp_unique_free(&source) == SP_OK);
+    assert(sp_unique_free(&destination) == SP_OK);
+    assert(sp_live_allocations() == 0);
+}
+
+static void test_repeated_make_free(void) {
+    for (size_t i = 0; i < 100000; ++i) {
+        sp_unique owner = SP_UNIQUE_EMPTY;
+
+        assert(sp_unique_make(&owner, sizeof(int), NULL)
+               == SP_OK);
+
+        int *value = sp_unique_get(&owner);
+        *value = 42;
+        assert(*value == 42);
+
+        assert(sp_unique_free(&owner) == SP_OK);
+    }
+
+    assert(sp_live_allocations() == 0);
+}
+
+int main(void) {
+    test_make_and_get();
+    test_move();
+    test_release();
+    test_invalid_inputs();
+    test_adopt();
+    test_adopt_occupied();
+    test_reset();
+    test_adopt_reset_empty_and_null();
+    assert(sp_live_allocations() == 0);
+    test_make_allocation_failure();
+    test_ownership_tracking();
+    test_invalid_handle_marker();
+    test_self_move();
+    test_release_and_free_status();
+    test_nested_resource_destructor();
+    test_move_occupied_destination();
+    test_repeated_make_free();
+    assert(sp_live_allocations() == 0);
+
+    printf("All unique-pointer tests passed!\n");
+    return 0;
+}
