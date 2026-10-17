@@ -8,7 +8,7 @@ int main(void) {
     sp_unique new_owner = SP_UNIQUE_EMPTY;
 
     if (sp_unique_make(&owner, sizeof(int), NULL)
-            != SP_UNIQUE_SUCCESS) {
+            != SP_OK) {
         fprintf(stderr, "Allocation failed\n");
         return 1;
     }
@@ -21,7 +21,7 @@ int main(void) {
            *(int *)sp_unique_get(&owner));
 
     if (sp_unique_move(&new_owner, &owner)
-            != SP_UNIQUE_SUCCESS) {
+            != SP_OK) {
         sp_unique_free(&owner);
         fprintf(stderr, "Ownership transfer failed\n");
         return 1;

@@ -1,84 +1,145 @@
-
-#include "sp_unique.h"
-
+    #include "sp_unique.h"
 #include "sp_internal.h"
 
 /*
- * Only call with NULL or a pointer to an initialized handle.
- * The marker does not validate arbitrary memory or raw copies.
+ * Requires NULL or a pointer to an initialized handle.
+ * Cannot validate arbitrary memory or detect copied owners.
  */
-static int sp_unique_is_valid(const sp_unique *owner) {
+static sp_status validate(const sp_unique *owner) {
     if (owner == NULL) {
-        return 0;
+        return SP_ERR_NULL_ARG;
     }
 
     if (owner->magic != SP_MAGIC_UNIQUE) {
-        return 0;
+        return SP_ERR_INVALID_HANDLE;
     }
 
-    /* Empty handles must not retain a destructor. */
-    return owner->ptr != NULL || owner->destroy == NULL;
+    if (owner->ptr == NULL && owner->destroy != NULL) {
+        return SP_ERR_INVALID_HANDLE;
+    }
+
+    return SP_OK;
 }
 
+/* The handle is already empty/replaced before this is called. */
+static void destroy_object(
+    void *object,
+    sp_destructor_fn destroy
+) {
+    if (object != NULL) {
+        if (destroy != NULL) {
+            destroy(object);
+        }
 
-int sp_unique_make(
+        sp__free(object);
+    }
+}
+
+sp_status sp_unique_make(
     sp_unique *owner,
     size_t size,
     sp_destructor_fn destroy
 ) {
-    if (!sp_unique_is_valid(owner) || size == 0) {
-        return SP_UNIQUE_ERROR;
+    sp_status status = validate(owner);
+
+    if (status != SP_OK) {
+        return status;
     }
 
-    /* Do not overwrite an existing owner. */
-    if (owner->ptr != NULL || owner->destroy != NULL) {
-        return SP_UNIQUE_ERROR;
+    if (size == 0) {
+        return SP_ERR_INVALID_SIZE;
+    }
+
+    if (owner->ptr != NULL) {
+        return SP_ERR_NOT_EMPTY;
     }
 
     void *memory = sp__alloc(size);
 
     if (memory == NULL) {
-        return SP_UNIQUE_ERROR;
+        return SP_ERR_NO_MEMORY;
     }
 
     owner->ptr = memory;
     owner->destroy = destroy;
 
-    return SP_UNIQUE_SUCCESS;
+    return SP_OK;
+}
+
+sp_status sp_unique_adopt(
+    sp_unique *owner,
+    void *raw,
+    sp_destructor_fn destroy
+) {
+    sp_status status = validate(owner);
+
+    if (status != SP_OK) {
+        return status;
+    }
+
+    if (owner->ptr != NULL) {
+        return SP_ERR_NOT_EMPTY;
+    }
+
+    if (raw != NULL) {
+        status = sp__track_external();
+
+        if (status != SP_OK) {
+            return status;
+        }
+    }
+
+    owner->ptr = raw;
+    owner->destroy = raw != NULL ? destroy : NULL;
+
+    return SP_OK;
 }
 
 void *sp_unique_get(const sp_unique *owner) {
-    if (!sp_unique_is_valid(owner)) {
-        return NULL;
-    }
-
-    return owner->ptr;
+    return validate(owner) == SP_OK ? owner->ptr : NULL;
 }
 
-int sp_unique_move(sp_unique *dst, sp_unique *src) {
-    if (!sp_unique_is_valid(dst) || !sp_unique_is_valid(src)) {
-        return SP_UNIQUE_ERROR;
+sp_status sp_unique_move(sp_unique *dst, sp_unique *src) {
+    sp_status status = validate(dst);
+
+    if (status != SP_OK) {
+        return status;
     }
 
-    /* Moving a handle to itself changes nothing. */
+    status = validate(src);
+
+    if (status != SP_OK) {
+        return status;
+    }
+
     if (dst == src) {
-        return SP_UNIQUE_SUCCESS;
+        return SP_OK;
     }
 
-    /* A move must not overwrite an existing owner. */
-    if (dst->ptr != NULL || dst->destroy != NULL) {
-        return SP_UNIQUE_ERROR;
+    if (dst->ptr != NULL) {
+        return SP_ERR_NOT_EMPTY;
     }
 
     *dst = *src;
     *src = SP_UNIQUE_EMPTY;
 
-    return SP_UNIQUE_SUCCESS;
+    return SP_OK;
 }
 
-void *sp_unique_release(sp_unique *owner) {
-    if (!sp_unique_is_valid(owner)) {
-        return NULL;
+sp_status sp_unique_release(sp_unique *owner, void **raw_out) {
+    if (raw_out == NULL) {
+        return SP_ERR_NULL_ARG;
+    }
+
+    sp_status status = validate(owner);
+
+    if (status != SP_OK) {
+        return status;
+    }
+
+    /* Writing through this alias would refill the emptied handle. */
+    if (raw_out == &owner->ptr) {
+        return SP_ERR_INVALID_HANDLE;
     }
 
     void *memory = owner->ptr;
@@ -88,70 +149,30 @@ void *sp_unique_release(sp_unique *owner) {
         sp__untrack();
     }
 
-    return memory;
+    *raw_out = memory;
+    return SP_OK;
 }
 
-void sp_unique_free(sp_unique *owner) {
-    if (!sp_unique_is_valid(owner)) {
-        return;
-    }
-
-    if (owner->ptr != NULL) {
-        if (owner->destroy != NULL) {
-            owner->destroy(owner->ptr);
-        }
-
-        sp__free(owner->ptr);;
-    }
-
-    *owner = SP_UNIQUE_EMPTY;
-}
-
-int sp_unique_adopt(
-    sp_unique *owner,
-    void *raw,
-    sp_destructor_fn destroy
-) {
-    if (!sp_unique_is_valid(owner)) {
-        return SP_UNIQUE_ERROR;
-    }
-
-    if (owner->ptr != NULL || owner->destroy != NULL) {
-        return SP_UNIQUE_ERROR;
-    }
-
-    if (raw != NULL) {
-        if (sp__track_external() != SP_OK) {
-            return SP_UNIQUE_ERROR;
-        }
-    }
-
-    owner->ptr = raw;
-    owner->destroy = raw != NULL ? destroy : NULL;
-
-    return SP_UNIQUE_SUCCESS;
-}
-
-int sp_unique_reset(
+sp_status sp_unique_reset(
     sp_unique *owner,
     void *new_raw,
     sp_destructor_fn destroy
 ) {
-    if (!sp_unique_is_valid(owner)) {
-        return SP_UNIQUE_ERROR;
+    sp_status status = validate(owner);
+
+    if (status != SP_OK) {
+        return status;
     }
 
     if (owner->ptr == new_raw) {
-        return SP_UNIQUE_SUCCESS;
+        return SP_OK;
     }
 
-    /*
-     * Register the replacement before changing the handle.
-     * Failure leaves both ownerships unchanged.
-     */
     if (new_raw != NULL) {
-        if (sp__track_external() != SP_OK) {
-            return SP_UNIQUE_ERROR;
+        status = sp__track_external();
+
+        if (status != SP_OK) {
+            return status;
         }
     }
 
@@ -161,13 +182,23 @@ int sp_unique_reset(
     owner->ptr = new_raw;
     owner->destroy = new_raw != NULL ? destroy : NULL;
 
-    if (old_ptr != NULL) {
-        if (old_destroy != NULL) {
-            old_destroy(old_ptr);
-        }
+    destroy_object(old_ptr, old_destroy);
 
-        sp__free(old_ptr);
+    return SP_OK;
+}
+
+sp_status sp_unique_free(sp_unique *owner) {
+    sp_status status = validate(owner);
+
+    if (status != SP_OK) {
+        return status;
     }
 
-    return SP_UNIQUE_SUCCESS;
+    void *old_ptr = owner->ptr;
+    sp_destructor_fn old_destroy = owner->destroy;
+
+    *owner = SP_UNIQUE_EMPTY;
+    destroy_object(old_ptr, old_destroy);
+
+    return SP_OK;
 }
