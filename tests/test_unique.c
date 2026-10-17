@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "sp_unique.h"
+#include "smartptr.h"
 
 static void test_make_and_get(void) {
     sp_unique owner = SP_UNIQUE_EMPTY;
@@ -172,6 +172,68 @@ static void test_adopt_reset_empty_and_null(void) {
            == SP_UNIQUE_SUCCESS);
 }
 
+static void *always_fail(size_t size) {
+    (void)size;
+    return NULL;
+}
+
+static void test_make_allocation_failure(void) {
+    sp_unique owner = SP_UNIQUE_EMPTY;
+
+    assert(sp_live_allocations() == 0);
+
+    assert(sp_set_allocator(always_fail, free) == SP_OK);
+
+    assert(sp_unique_make(&owner, sizeof(int), NULL)
+           == SP_UNIQUE_ERROR);
+
+    assert(sp_unique_get(&owner) == NULL);
+    assert(sp_live_allocations() == 0);
+
+    assert(sp_set_allocator(NULL, NULL) == SP_OK);
+}
+
+static void test_ownership_tracking(void) {
+    sp_unique source = SP_UNIQUE_EMPTY;
+    sp_unique destination = SP_UNIQUE_EMPTY;
+
+    assert(sp_live_allocations() == 0);
+
+    assert(sp_unique_make(&source, sizeof(int), NULL)
+           == SP_UNIQUE_SUCCESS);
+    assert(sp_live_allocations() == 1);
+
+    assert(sp_set_allocator(NULL, NULL)
+           == SP_ERR_NOT_EMPTY);
+
+    assert(sp_unique_move(&destination, &source)
+           == SP_UNIQUE_SUCCESS);
+    assert(sp_live_allocations() == 1);
+
+    int *raw = sp_unique_release(&destination);
+    assert(raw != NULL);
+    assert(sp_live_allocations() == 0);
+
+    assert(sp_unique_adopt(&source, raw, NULL)
+           == SP_UNIQUE_SUCCESS);
+    assert(sp_live_allocations() == 1);
+
+    int *replacement = malloc(sizeof *replacement);
+    assert(replacement != NULL);
+
+    assert(sp_unique_reset(&source, replacement, NULL)
+           == SP_UNIQUE_SUCCESS);
+    assert(sp_live_allocations() == 1);
+
+    assert(sp_unique_reset(&source, NULL, NULL)
+           == SP_UNIQUE_SUCCESS);
+    assert(sp_live_allocations() == 0);
+
+    sp_unique_free(&source);
+    sp_unique_free(&destination);
+    assert(sp_live_allocations() == 0);
+}
+
 
 int main(void) {
     test_make_and_get();
@@ -182,6 +244,10 @@ int main(void) {
     test_adopt_occupied();
     test_reset();
     test_adopt_reset_empty_and_null();
+    assert(sp_live_allocations() == 0);
+    test_make_allocation_failure();
+    test_ownership_tracking();
+    assert(sp_live_allocations() == 0);
 
     printf("All unique-pointer tests passed!\n");
     return 0;
