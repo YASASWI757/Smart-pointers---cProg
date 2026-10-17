@@ -4,3 +4,4 @@
 *.gcda
 *.gcno
 build/
+*.a
