@@ -13,11 +13,13 @@ BUILD = build
 LIB = $(BUILD)/libsmartptr.a
 OBJECTS = $(BUILD)/sp_common.o $(BUILD)/sp_unique.o $(BUILD)/sp_shared.o
 TESTS = $(BUILD)/test_common $(BUILD)/test_allocator $(BUILD)/test_unique $(BUILD)/test_shared
-DEMO = $(BUILD)/unique_demo
+DEMOS = $(BUILD)/unique_demo $(BUILD)/shared_demo $(BUILD)/midterm_demo
 
-.PHONY: all lib test demo asan valgrind clean
+VALGRIND = valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1
 
-all: lib $(TESTS) $(DEMO)
+.PHONY: all lib test demo asan valgrind bug clean
+
+all: lib $(TESTS) $(DEMOS)
 
 lib: $(LIB)
 
@@ -33,7 +35,7 @@ $(LIB): $(OBJECTS)
 $(BUILD)/test_%: tests/test_%.c $(LIB) $(wildcard include/*.h src/*.h)
 >$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $< $(LIB) $(LDLIBS) -o $@
 
-$(DEMO): examples/unique_demo.c $(LIB) $(wildcard include/*.h)
+$(BUILD)/%_demo: examples/%_demo.c $(LIB) $(wildcard include/*.h)
 >$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $< $(LIB) $(LDLIBS) -o $@
 
 test: $(TESTS)
@@ -42,18 +44,25 @@ test: $(TESTS)
 >$(BUILD)/test_unique
 >$(BUILD)/test_shared
 
-demo: $(DEMO)
->$(DEMO)
+demo: $(DEMOS)
+>$(BUILD)/midterm_demo
+>$(BUILD)/shared_demo
 
 asan:
 >$(MAKE) BUILD=build/asan CFLAGS="$(CFLAGS) -fsanitize=address,undefined -fno-omit-frame-pointer" LDFLAGS="$(LDFLAGS) -fsanitize=address,undefined" test demo
 
-valgrind: $(TESTS) $(DEMO)
->valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1 $(BUILD)/test_common
->valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1 $(BUILD)/test_allocator
->valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1 $(BUILD)/test_unique
->valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1 $(BUILD)/test_shared
->valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1 $(DEMO)
+valgrind: $(TESTS) $(DEMOS)
+>$(VALGRIND) $(BUILD)/test_common
+>$(VALGRIND) $(BUILD)/test_allocator
+>$(VALGRIND) $(BUILD)/test_unique
+>$(VALGRIND) $(BUILD)/test_shared
+>$(VALGRIND) $(BUILD)/midterm_demo
+>$(VALGRIND) $(BUILD)/shared_demo
+
+# The problem without the library: plain double free (expected to crash).
+bug: | $(BUILD)
+>$(CC) -g examples/raw_bug.c -o $(BUILD)/raw_bug
+>-$(BUILD)/raw_bug
 
 clean:
 >rm -rf build
