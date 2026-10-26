@@ -11,8 +11,8 @@ LDLIBS =
 BUILD = build
 
 LIB = $(BUILD)/libsmartptr.a
-OBJECTS = $(BUILD)/sp_common.o $(BUILD)/sp_unique.o
-TESTS = $(BUILD)/test_common $(BUILD)/test_allocator $(BUILD)/test_unique
+OBJECTS = $(BUILD)/sp_common.o $(BUILD)/sp_unique.o $(BUILD)/sp_shared.o
+TESTS = $(BUILD)/test_common $(BUILD)/test_allocator $(BUILD)/test_unique $(BUILD)/test_shared
 DEMO = $(BUILD)/unique_demo
 
 .PHONY: all lib test demo asan valgrind clean
@@ -40,6 +40,7 @@ test: $(TESTS)
 >$(BUILD)/test_common
 >$(BUILD)/test_allocator
 >$(BUILD)/test_unique
+>$(BUILD)/test_shared
 
 demo: $(DEMO)
 >$(DEMO)
@@ -51,6 +52,7 @@ valgrind: $(TESTS) $(DEMO)
 >valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1 $(BUILD)/test_common
 >valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1 $(BUILD)/test_allocator
 >valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1 $(BUILD)/test_unique
+>valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1 $(BUILD)/test_shared
 >valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1 $(DEMO)
 
 clean:

@@ -3,5 +3,6 @@
 
 #include "sp_common.h"
 #include "sp_unique.h"
+#include "sp_shared.h"
 
 #endif
