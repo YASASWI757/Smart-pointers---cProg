@@ -1,7 +1,2 @@
-*.exe
-*.o
-*.out
-*.gcda
-*.gcno
 build/
-*.a
+*.jsonl

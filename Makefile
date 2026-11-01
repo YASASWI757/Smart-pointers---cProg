@@ -1,71 +1,54 @@
 .RECIPEPREFIX := >
 
-CC = gcc
-AR = ar
+CC       ?= gcc
+CPPFLAGS  = -Iinclude -Isrc
+CFLAGS   ?= -std=c11 -Wall -Wextra -Wpedantic -Werror -g -O1
+LDLIBS    = -pthread
+BUILD    ?= build
 
-CPPFLAGS = -Iinclude -Isrc
-CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -Werror -g
-LDFLAGS =
-LDLIBS =
+LIB      = $(BUILD)/libsmartptr.a
+OBJECTS  = $(BUILD)/sp_guard.o $(BUILD)/sp_report.o $(BUILD)/sp_ptr.o
+TESTS    = $(patsubst tests/%.c,$(BUILD)/%,$(wildcard tests/test_*.c))
+EXAMPLES = $(patsubst examples/%.c,$(BUILD)/%,$(wildcard examples/[0-9]*.c))
 
-BUILD = build
 
-LIB = $(BUILD)/libsmartptr.a
-OBJECTS = $(BUILD)/sp_common.o $(BUILD)/sp_unique.o $(BUILD)/sp_shared.o
-TESTS = $(BUILD)/test_common $(BUILD)/test_allocator $(BUILD)/test_unique $(BUILD)/test_shared
-DEMOS = $(BUILD)/unique_demo $(BUILD)/shared_demo $(BUILD)/midterm_demo
+.PHONY: all lib test examples demo bug clean
 
-VALGRIND = valgrind --leak-check=full --show-leak-kinds=all --errors-for-leak-kinds=all --error-exitcode=1
-
-.PHONY: all lib test demo asan valgrind bug clean
-
-all: lib $(TESTS) $(DEMOS)
+all: lib $(TESTS) $(EXAMPLES)
 
 lib: $(LIB)
 
 $(BUILD):
 >mkdir -p $(BUILD)
 
-$(BUILD)/%.o: src/%.c | $(BUILD)
->$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -MP -c $< -o $@
+$(BUILD)/%.o: src/%.c src/sp_internal.h $(wildcard include/*.h) | $(BUILD)
+>$(CC) $(CPPFLAGS) $(CFLAGS) -pthread -c $< -o $@
 
 $(LIB): $(OBJECTS)
->$(AR) rcs $@ $^
+>ar rcs $@ $^
 
-$(BUILD)/test_%: tests/test_%.c $(LIB) $(wildcard include/*.h src/*.h)
->$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $< $(LIB) $(LDLIBS) -o $@
+$(BUILD)/test_%: tests/test_%.c tests/check.h $(LIB)
+>$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) $(LDLIBS) -o $@
 
-$(BUILD)/%_demo: examples/%_demo.c $(LIB) $(wildcard include/*.h)
->$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) $< $(LIB) $(LDLIBS) -o $@
+$(BUILD)/%: examples/%.c $(LIB)
+>$(CC) $(CPPFLAGS) $(CFLAGS) $< $(LIB) $(LDLIBS) -o $@
 
 test: $(TESTS)
->$(BUILD)/test_common
->$(BUILD)/test_allocator
->$(BUILD)/test_unique
->$(BUILD)/test_shared
+>@for t in $(TESTS); do ./$$t || exit 1; done
+>@echo "ALL TEST SUITES PASSED"
 
-demo: $(DEMOS)
->$(BUILD)/midterm_demo
->$(BUILD)/shared_demo
+examples: $(EXAMPLES)
 
-asan:
->$(MAKE) BUILD=build/asan CFLAGS="$(CFLAGS) -fsanitize=address,undefined -fno-omit-frame-pointer" LDFLAGS="$(LDFLAGS) -fsanitize=address,undefined" test demo
+# The showcase: every example, with Sentinel's reports.
+demo: $(EXAMPLES)
+>@for e in $(EXAMPLES); do echo; echo "################ $$e"; ./$$e; done
 
-valgrind: $(TESTS) $(DEMOS)
->$(VALGRIND) $(BUILD)/test_common
->$(VALGRIND) $(BUILD)/test_allocator
->$(VALGRIND) $(BUILD)/test_unique
->$(VALGRIND) $(BUILD)/test_shared
->$(VALGRIND) $(BUILD)/midterm_demo
->$(VALGRIND) $(BUILD)/shared_demo
-
-# The problem without the library: plain double free (expected to crash).
+# The bug without the library: plain C double free.
 bug: | $(BUILD)
 >$(CC) -g examples/raw_bug.c -o $(BUILD)/raw_bug
->-$(BUILD)/raw_bug
+>-./$(BUILD)/raw_bug
 
 clean:
 >rm -rf build
->rm -f unique_demo.exe test_unique.exe
 
 -include $(OBJECTS:.o=.d)
