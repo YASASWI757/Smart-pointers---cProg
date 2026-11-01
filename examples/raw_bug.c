@@ -1,7 +1,6 @@
 /*
- * raw_bug.c - the problem WITHOUT our library.
- * Plain malloc/free: two names for one block, both freed.
- * Run under AddressSanitizer to watch it get caught.
+ * raw_bug.c - the problem WITHOUT the library: plain C double free.
+ * Compare with 01_zero_api.c, which has the same bug plus four more.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,7 +8,7 @@
 int main(void)
 {
     int *p = malloc(sizeof *p);
-    int *q = p;          /* a second "owner" that nobody tracks */
+    int *q = p;          /* a second "owner" nobody tracks */
     *p = 42;
     printf("value = %d\n", *q);
     free(p);
